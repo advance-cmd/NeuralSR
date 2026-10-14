@@ -1,0 +1,9 @@
+.venv/
+data/train/
+data/test/
+__pycache__/
+*.pth
+runs/
+install_torch.log
+data/day1_check.png
+.idea/
