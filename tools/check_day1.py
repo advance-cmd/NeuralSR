@@ -86,8 +86,10 @@ def main():
         check(False, "DataLoader 拼 batch", str(e).splitlines()[0][:200])
         print(f"{failed} 项没过")
         return
-    if not check(tuple(lr.shape) == (4, 3, p, p) and tuple(hr.shape) == (4, 3, 2 * p, 2 * p), f"一批 lr {tuple(lr.shape)}  gb {tuple(gb.shape)}  hr {tuple(hr.shape)}",
-          "DataLoader 会在最前面加一维 batch"):
+    if not check(tuple(lr.shape) == (4, 3, p, p) and tuple(gb.shape) == (4, 9, 2 * p, 2 * p) and tuple(hr.shape) == (4, 3, 2 * p, 2 * p),
+                 f"一批 lr {tuple(lr.shape)}  gb {tuple(gb.shape)}  hr {tuple(hr.shape)}",
+                 f"应该是 (4, 3, {p}, {p}) / (4, 9, {2 * p}, {2 * p}) / (4, 3, {2 * p}, {2 * p})：DataLoader 只在最前面加一维 batch，"
+                 "后面三维和单个样本一样，先修好 [1] 的形状"):
         print(f"{failed} 项没过")
         return
 

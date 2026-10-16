@@ -38,6 +38,10 @@ G-Buffer 和深度都是 2K 的：在 2K 下 G-Buffer Pass 只要约 0.25 ms，
 - `lr.npy`、`hr.npy`、`albedo.npy`、`normal.npy`：和 PNG 一样，(H, W, 3) uint8；
 - `mr.npy`：只留两个通道，(H, W, 2) uint8，依次是金属度、粗糙度。
 
+测试集另有 `region.npy`（2560×1440 uint8，`tools/make_masks.py` 生成）：0 = 其他（G-Buffer 里有的不透明物体）、
+1 = 天空、2 = 水面、3 = 镜子。做法是用深度和机位还原每个像素的世界坐标，看视线先碰到水面、镜子还是不透明物体。
+预览见 `regions_preview.jpg`（蓝 = 天空，青 = 水面，橙 = 镜子）。
+
 `np.load(路径, mmap_mode="r")` 打开时不读盘，切片后 `np.array(...)` 只读切出来的那一块。
 实测：解一个样本的 5 张 PNG 约 200 ms；从 `.npy` 裁一个 128×128 的 HR 块（6 个文件）约 5 ms。
 

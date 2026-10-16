@@ -8,8 +8,8 @@ from dataset import SRDataset
 
 def psnr(sr, hr):
     """两张 0..1 的图 → PSNR（dB）。PSNR = 10·log10(MAX² / MSE)，MAX = 像素可能的最大值"""
-    mse = 空9
-    return 空10
+    mse = ((sr - hr)**2).mean()
+    return 10*torch.log10(1/mse)
 
 
 if __name__ == "__main__":
@@ -18,9 +18,9 @@ if __name__ == "__main__":
     scores = []
     with torch.no_grad():
         for lr, gb, hr in loader:
-            lr, hr = 空11
-            sr = F.interpolate(lr, scale_factor=2, mode="bicubic", align_corners=空12)
-            sr = 空13
+            lr, hr = lr.to(dev), hr.to(dev)
+            sr = F.interpolate(lr, scale_factor=2, mode="bicubic", align_corners=False)
+            sr = sr.clamp(min=0, max=1)
             scores.append(psnr(sr, hr).item())
     s = torch.tensor(scores)
     # 测试集前 33 张是随机机位，后 7 张是 demo 机位（p1–p7）
