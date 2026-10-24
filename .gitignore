@@ -7,3 +7,6 @@ runs/
 install_torch.log
 data/day1_check.png
 .idea/
+data/seq/train/
+data/seq/test/
+data/seq/raw/

@@ -1,0 +1,17 @@
+seq,split,kind,poi,balls,speed
+0,train,static,hills,0,0.000
+1,train,pan,floor,0,-0.459
+2,train,strafe,crates,0,0.130
+3,train,orbit,hills,1,0.729
+4,train,dolly,hills,0,-0.113
+5,train,static,floor,1,-0.000
+6,train,pan,water,0,-0.412
+7,train,strafe,spheres,1,0.065
+8,train,orbit,hills,0,0.789
+9,train,dolly,mirror,0,0.102
+10,train,static,crates,0,0.000
+11,train,pan,water,0,0.382
+12,test,static,spheres,1,0.000
+13,test,pan,spheres,1,-0.334
+14,test,strafe,spheres,1,-0.116
+15,test,orbit,hills,0,0.468
