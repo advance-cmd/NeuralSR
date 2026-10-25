@@ -31,6 +31,34 @@ class SRNet(nn.Module):
         up = F.interpolate(lr, scale_factor=2, mode="bicubic", align_corners=False)
         return up + detail  # 双三次放大 + 补充细节
 
+class MFNet(nn.Module):
+    """s194 多帧：模型 B 的输入再加三样——
+    拉过来的上一帧输出（log 空间）、
+    遮挡掩码、
+    这一帧的抖动。
+        整个网络还是在 720p 的格子上算：2K 的东西都先 PixelUnshuffle 成 4 倍通道"""
+    def __init__(self,c=32):
+        super().__init__()
+        # 第一层的输入通道数：颜色 3 + G-Buffer 9×4 + 上一帧输出 3×4 + 掩码 1×4 + 抖动 2
+        cin = 3 + 4*9 + 3*4 + 1*4 + 2
+        self.unshuffle = nn.PixelUnshuffle(2)
+        self.body = nn.Sequential(
+            nn.Conv2d(cin, c, 5, padding=2), nn.ReLU(),
+            nn.Conv2d(c,c,3,padding=1), nn.ReLU(),
+            nn.Conv2d(c,c,3,padding=1), nn.ReLU(),
+            nn.Conv2d(c,12,3,padding=1),
+        )
+        self.shuffle = nn.PixelShuffle(2)
+
+    def forward(self, lr, gb, hist, mask, jitter):
+        """lr (B, 3, H, W)、hist (B, 3, 2H, 2W) 都在 log 空间；gb (B, 9, 2H, 2W)；mask (B, 1, 2H, 2W)；jitter (B, 2)。返回 (B, 3, 2H, 2W)"""
+        n,c,h,w = lr.shape
+        # 抖动是每帧两个数，铺满成两张 (h, w) 的图，才能和别的按通道拼
+        j = jitter.view(n,2,1,1).expand(n,2,h,w)
+        x = torch.cat([lr,self.unshuffle(gb),self.unshuffle(hist),self.unshuffle(mask),j],dim=1)
+        detail = self.shuffle(self.body(x))
+        up = F.interpolate(lr, scale_factor=2, mode="bicubic", align_corners=False)
+        return up + detail
 
 if __name__ == "__main__":
     lr = torch.rand(2, 3, 64, 64)

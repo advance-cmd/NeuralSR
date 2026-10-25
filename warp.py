@@ -11,7 +11,7 @@ def backward_warp(prev, velocity, jitter_prev, jitter_cur):
     prev        (N, C, H, W) 上一帧（任意通道：颜色、深度、上一帧的网络输出都行）
     velocity    (N, 2, H, W) 这一帧的速度缓冲：这一帧的 uv − 上一帧的 uv（不含抖动）
     jitter_*    (N, 2)       两帧各自的抖动（像素，x 向右、y 向下：整幅画面往右下移了这么多）
-    返回 warped (N, C, H, W)、valid (N, 1, H, W)（上一帧的位置在屏幕里 = True）
+    返回 warped (N, C, H, W) {上一帧被拉到这一帧以后的样子}、valid (N, 1, H, W) {上一帧的位置在屏幕里 = True}
     """
     n, c, h, w = prev.shape
     dev = prev.device

@@ -148,8 +148,16 @@ def part2():
     m = MFNet()
     n = sum(p.numel() for p in m.parameters())
     first = m.body[0].in_channels if hasattr(m, "body") else None
-    check(f"参数 {n}（应该是 67596），第一层输入 {first} 个通道（应该是 57）", n == 67596 and first == 57,
-          "空5：3 + 9×4 + 3×4 + 1×4 + 2：2K 的东西 PixelUnshuffle 以后通道 ×4，抖动铺成 2 张图")
+    if first != 57:
+        hint = "空5：3 + 9×4 + 3×4 + 1×4 + 2：2K 的东西 PixelUnshuffle 以后通道 ×4，抖动铺成 2 张图"
+    elif m.body[0].out_channels != 32:
+        hint = (f"第一层是 Conv2d(cin, {m.body[0].out_channels}, …)：输出应该是 c（32）张特征图，"
+                "第二层 Conv2d(c, c, …) 才接得上。除了 cin，body 和模型 B 一模一样")
+    else:
+        hint = "除了 cin，body 和模型 B 一模一样：对照 SRNet 的 body 看"
+    check(f"参数 {n}（应该是 67596），第一层输入 {first} 个通道（应该是 57）", n == 67596 and first == 57, hint)
+    check("最后一层是 Conv2d，后面没有 ReLU", isinstance(m.body[-1], nn.Conv2d),
+          "detail 要能是负数：双三次比 GT 亮的地方要往下减。ReLU 把负数全变成 0，所以和模型 B 一样，最后一层后面不加 ReLU")
     if first != 57:
         return
     torch.manual_seed(0)
@@ -158,7 +166,14 @@ def part2():
     try:
         out = m(lr, gb, hist, mask, jit)
     except Exception as e:  # noqa: BLE001
-        check("forward 能跑", False, f"{type(e).__name__}: {e}（空6：jitter.view(n, 2, 1, 1).expand(n, 2, h, w)）")
+        msg = str(e)
+        if "expand" in msg:
+            hint = "空6：jitter 是 (n, 2)，先 view(n, 2, 1, 1) 变成每个样本 2 张 1×1 的图，再 expand(n, 2, h, w) 铺满"
+        elif "channels" in msg:
+            hint = "body 的层与层接不上：每一层的输入通道 = 上一层的输出通道"
+        else:
+            hint = "空6：jitter.view(n, 2, 1, 1).expand(n, 2, h, w)"
+        check("forward 能跑", False, f"{type(e).__name__}: {msg}（{hint}）")
         return
     check(f"输出形状 {tuple(out.shape)}", tuple(out.shape) == (2, 3, 32, 32))
     up = F.interpolate(lr, scale_factor=2, mode="bicubic", align_corners=False)
@@ -177,7 +192,18 @@ def part2():
     check("第一帧（prev = None）：历史 (1, 3, 32, 32) 全 0、掩码 (1, 1, 32, 32) 全 0",
           tuple(h0.shape) == (1, 3, 32, 32) and tuple(m0.shape) == (1, 1, 32, 32) and h0.abs().sum() == 0 and m0.abs().sum() == 0, "空7")
     out = torch.rand(1, 3, 32, 32)
-    hist, mask = mf.history_inputs((out, gb[:, 8:9].clone()), torch.zeros(1, 2, 16, 16), gb)
+    try:
+        hist, mask = mf.history_inputs((out, gb[:, 8:9].clone()), torch.zeros(1, 2, 16, 16), gb)
+    except Exception as e:  # noqa: BLE001
+        msg = str(e)
+        hint = ("空9：两个抖动的形状是 (n, 2)（backward_warp 里会 view(n, 2, 1, 1)），不是速度图那么大：torch.zeros(n, 2, device=gb.device)"
+                if "invalid for input of size" in msg else "空8–11 对照注释看一遍")
+        check("有上一帧时能跑", False, f"{type(e).__name__}: {msg}（{hint}）")
+        return
+    if not check(f"历史 {tuple(hist.shape)}、掩码 {tuple(mask.shape)}（应该是 (1, 3, 32, 32)、(1, 1, 32, 32)）",
+                 tuple(hist.shape) == (1, 3, 32, 32) and tuple(mask.shape) == (1, 1, 32, 32),
+                 "空10 上面那行：这一帧的 1/深度是 gb[:, 8:9]：逗号前的 : 是 batch 全要，逗号后的 8:9 是第 8 个通道（保留这一维）"):
+        return
     check("不动：历史 = 上一帧的输出，掩码全 1", torch.allclose(hist, out, atol=1e-6) and mask.min() == 1,
           "空8–11：速度 0、深度一样，应该原样拿过来")
     check("掩码是 0/1 的 float", mask.dtype == torch.float32, "空11：(valid & same).float()")
@@ -203,6 +229,18 @@ def part2():
     check("深度 10 → 9.5（差 5%）：掩码 1", mask[0, 0, :8, 8:16].min() == 1, "空10：比的是相对差：|差| ≤ DEPTH_TOL × 两个里大的那个")
     check("上一帧不是天空、这一帧是：掩码 0", mask[0, 0, 8:16, :8].max() == 0)
     check("两帧都是天空（1/深度 都是 0）：掩码 1", mask[0, 0, 16:, 16:].min() == 1, "空10：用 ≤，0 ≤ 0 才成立")
+    if torch.cuda.is_available():
+        dev = torch.device("cuda")
+        g, v = cur.to(dev), torch.zeros(1, 2, 16, 16, device=dev)
+        try:
+            h0, m0 = mf.history_inputs(None, v, g)
+            on_gpu = h0.is_cuda and m0.is_cuda
+            mf.history_inputs((out.to(dev), prev_inv.to(dev)), v, g)
+        except RuntimeError:
+            on_gpu = False
+        check("数据在 GPU 上时也能跑，历史和掩码也在 GPU 上", on_gpu,
+              "空7、空9：torch.zeros 要加 device=gb.device。训练时数据在 GPU 上，不加就建在 CPU 上，"
+              "一拼就报 Expected all tensors to be on the same device")
 
     print("4. run_frame、clip_loss")
     from hdr import encode
@@ -215,7 +253,8 @@ def part2():
     net = MFNet()
     o, prev, m1 = mf.run_frame(net, None, lr[:, 0], gb[:, 0], vel[:, 0], jit[:, 0])
     check("run_frame 返回的 prev = (这一帧的输出, 这一帧的 1/深度)",
-          isinstance(prev, tuple) and len(prev) == 2 and prev[0] is o and torch.equal(prev[1], gb[:, 0, 8:9]), "空12")
+          isinstance(prev, tuple) and len(prev) == 2 and prev[0] is o and torch.equal(prev[1], gb[:, 0, 8:9]),
+          "空12：prev 是一个元组，里面两样，要加括号：return out, (out, 1/深度), mask")
     up = lambda x: F.interpolate(x, scale_factor=2, mode="bicubic", align_corners=False)
     want = sum((up(encode(lr[:, k])) - encode(hr[:, k])).abs().mean() for k in range(3)) / 3
     try:
@@ -226,7 +265,7 @@ def part2():
         mf.clip_loss(net2, lr, gb, hr, vel, jit).backward()
         check("梯度能传回每一层", all(p.grad is not None and p.grad.abs().sum() > 0 for p in net2.parameters() if p.dim() > 1))
     except Exception as e:  # noqa: BLE001
-        check("clip_loss 能跑", False, f"{type(e).__name__}: {e}（空13：lr[:, k]，不是 lr[k]）")
+        check("clip_loss 能跑", False, f"{type(e).__name__}: {e}（空13：每个张量都取第 k 帧：lr[:, k]、gb[:, k]、velocity[:, k]、jitter[:, k]）")
 
 
 class Accum(nn.Module):
