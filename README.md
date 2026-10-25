@@ -183,14 +183,14 @@
 | 方法 | PSNR | SSIM | 其他 | 天空 | 水面 | log 空间 L1 |
 |---|---|---|---|---|---|---|
 | 双三次（在线性 HDR 上放大） | 30.64 | 0.8777 | 27.96 | 38.17 | 34.29 | 0.0035 |
-| 模型 A（只用颜色） | 31.38 | 0.8806 | 28.65 | 39.42 | 35.23 | 0.0033 |
-| 模型 B（颜色 + 2K G-Buffer） | **33.32** | **0.9432** | **30.84** | 38.79 | **36.85** | **0.0025** |
+| 模型 A（只用颜色） | 31.35 | 0.8799 | 28.63 | 39.31 | 35.23 | 0.0033 |
+| 模型 B（颜色 + 2K G-Buffer） | **33.51** | **0.9419** | **31.10** | **39.53** | **36.78** | **0.0025** |
 | *2K 直接画（不抗锯齿），对照* | *39.62* | *0.9893* | *37.03* | *46.34* | *43.12* | *0.0008* |
 
 - 测试集各区域像素占比：其他 44.6%、天空 7.8%、水面 47.6%、镜子 0%（测试段没拍到镜子）。
 - 和表 1 不能直接比：数据（序列帧、开了 IBL）、目标（64 次超采样，不是没抗锯齿的 2K）、空间（HDR + 屏幕空间，不是 Bloom 之后的 LDR）都换了。
-- 最后一行不是超分，是同一时刻按 2K 不抖地画一帧：它和超采样目标的差别只剩锯齿（39.62 dB）。单帧模型 B 比它低 6.3 dB——多帧要补的就是这一段。
-- 表 3 是参考实现跑出来的，单帧 HDR 这部分代码（`hdr.py`、`train_hdr.py`、`eval_hdr.py`）还在写。
+- 最后一行不是超分，是同一时刻按 2K 不抖地画一帧：它和超采样目标的差别只剩锯齿（39.62 dB）。单帧模型 B 比它低 6.1 dB——多帧要补的就是这一段。
+- 按段看（屏幕空间 PSNR，双三次 / A / B）：第 12 段（静止 + 球动）29.78 / 30.62 / 32.87，第 13 段（转头）30.03 / 30.86 / 32.97，第 14 段（横移）31.51 / 32.28 / 34.16，第 15 段（绕目标）31.25 / 31.64 / 34.03。
 
 ## 复现
 
@@ -212,6 +212,9 @@ python tools/gen_seq.py                                     # 16 段相机路径
 powershell -File tools/export/export_seqs.ps1 -Exe <打了 tools/export/patch_seq.py 的渲染器副本>\x64\Debug\LearnDX12.exe
 python tools/check_align.py                                 # 对齐检查的表（用 warp.py）
 python tools/make_align_fig.py                              # docs/align_check.png
+python train_hdr.py A                                       # 单帧 HDR 基线，存到 runs/hdr_A.pth
+python train_hdr.py B
+python eval_hdr.py                                          # 表 3
 ```
 
 数据集（单帧约 4.4 GB，另有约 10 GB 的 `.npy`；多帧约 38 GB）和训练好的权重（`runs/`）没有放进仓库，导出和转换方法见 [data/README.md](data/README.md)。
@@ -229,6 +232,8 @@ python tools/make_align_fig.py                              # docs/align_check.p
 | `tools/make_masks.py` | 给测试集标区域（其他 / 天空 / 水面 / 镜子） |
 | `tools/make_figures.py` | 表 2 和 `docs/` 里的图 |
 | `warp.py` | backward warping：用运动矢量（+ 抖动差）把上一帧拉到这一帧 |
+| `hdr.py` | HDR 的 log 空间（`encode` / `decode`）和屏幕空间（`tonemap`：× 曝光 → ACES → sRGB） |
+| `train_hdr.py`、`eval_hdr.py` | 单帧 HDR 基线的训练和评估（表 3）；数据读法在 `dataset.py` 的 `HDRDataset` |
 | `tools/gen_seq.py`、`convert_seq.py` | 多帧数据：生成相机路径；转换导出的序列、算区域掩码 |
 | `tools/check_align.py`、`make_align_fig.py` | 对齐检查的表和图 |
 | `tools/check_*.py` | 各步的检查脚本 |

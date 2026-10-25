@@ -15,6 +15,10 @@ def to_tensor(a):
     t = torch.from_numpy(np.array(a))  # np.array：把 mmap 里这一块真正读进内存
     return t.permute(2, 0, 1).float() / 255
 
+def to_tensor_Hdr(a):
+    """(H, W, C) float16 的 HDR 数组 → (C, H, W) float32 张量，值不变（HDR 不除以 255）"""
+    t = torch.from_numpy(np.array(a))  # np.array：把 mmap 里这一块真正读进内存
+    return t.permute(2, 0, 1).float()
 
 class SRDataset(Dataset):
     def __init__(self, split, patch=64, repeat=16):
@@ -49,6 +53,51 @@ class SRDataset(Dataset):
                         inv_depth[None]],  # 1：1/深度
                        dim=0)
         return to_tensor(lr), gb, to_tensor(hr)
+
+
+SEQ = os.path.join(DATA, "seq")
+
+
+class HDRDataset(Dataset):
+    """多帧数据集里的每一帧单独当一个样本（s193 的单帧 HDR 基线）。返回 (lr, gb, hr)：
+    lr (3, 720, 1280) 带抖动的线性 HDR；gb 和 SRDataset 一样的 9 通道 2K G-Buffer；hr (3, 1440, 2560) GT（2K、64 次抖动平均，线性 HDR）
+    文件名和内容见 data/README.md 最后一节"多帧数据集"。写完跑 python tools/check_hdrdata.py"""
+
+    def __init__(self, split, patch=64, repeat=16, every=1):
+        """every：每几帧取一帧（评估时用 every=4 省时间）"""
+        self.dir = os.path.join(SEQ, split)
+        # 空1：这个划分里每一帧的编号，是"段_帧"这样的字符串，比如 "12_07"。按 GT 文件列出来、排好序，再每 every 帧取一帧
+        self.ids = sorted(f[:5] for f in os.listdir(self.dir) if f.endswith("_gt.npy"))[::every]
+        self.patch = patch
+        self.repeat = repeat if patch else 1
+
+    def __len__(self):
+        return len(self.ids) * self.repeat
+
+    def __getitem__(self, i):
+        # 空2：这一帧所有文件名的公共前缀，比如 ".../seq/test/12_07_"（编号已经是字符串了）
+        base = os.path.join(self.dir, f"{self.ids[i%len(self.ids)]}_")
+        load = lambda name: np.load(base + name + ".npy", mmap_mode="r")
+        # 空3：输入用哪个文件（现在写的是单帧数据集的名字）
+        lr = load("color")  # (720, 1280, 3) float16
+        p = self.patch
+        if p:
+            y = random.randint(0, lr.shape[0] - p)
+            x = random.randint(0, lr.shape[1] - p)
+            lr = lr[y:y + p, x:x + p]
+            Y, X, P = y * 2, x * 2, p * 2
+            crop = lambda a: a[Y:Y + P, X:X + P]
+        else:
+            crop = lambda a: a
+        # 空4：HDR 的 numpy 数组 → (C, H, W) float32 张量。现在是照抄 to_tensor，它对 HDR 多做了一步
+        hdr = lambda a: to_tensor_Hdr(a)
+        # 空5：2K 的深度用哪个文件（现在写的是单帧数据集的名字，这个划分里也有同名文件，但尺寸不对）
+        depth = torch.from_numpy(np.array(crop(load("hrdepth")), dtype=np.float32))
+        inv_depth = torch.where(depth > 0, 1 / depth, 0)
+        gb = torch.cat([to_tensor(crop(load("albedo"))), to_tensor(crop(load("normal"))), to_tensor(crop(load("mr"))),
+                        inv_depth[None]], dim=0)
+        # 空6：目标用哪个文件（现在写的是单帧数据集的名字）
+        return hdr(lr), gb, hdr(crop(load("gt")))
 
 
 if __name__ == "__main__":
