@@ -42,10 +42,11 @@ class MFNet(nn.Module):
         # 第一层的输入通道数：颜色 3 + G-Buffer 9×4 + 上一帧输出 3×4 + 掩码 1×4 + 抖动 2
         cin = 3 + 4*9 + 3*4 + 1*4 + 2
         self.unshuffle = nn.PixelUnshuffle(2)
+        # LeakyReLU：负数乘 0.1 而不是变成 0。用 ReLU 时第一层 32 个通道有 20 个死掉（2500 步 32.65 dB），换了以后 33.96 dB
         self.body = nn.Sequential(
-            nn.Conv2d(cin, c, 5, padding=2), nn.ReLU(),
-            nn.Conv2d(c,c,3,padding=1), nn.ReLU(),
-            nn.Conv2d(c,c,3,padding=1), nn.ReLU(),
+            nn.Conv2d(cin, c, 5, padding=2), nn.LeakyReLU(0.1),
+            nn.Conv2d(c,c,3,padding=1), nn.LeakyReLU(0.1),
+            nn.Conv2d(c,c,3,padding=1), nn.LeakyReLU(0.1),
             nn.Conv2d(c,12,3,padding=1),
         )
         self.shuffle = nn.PixelShuffle(2)

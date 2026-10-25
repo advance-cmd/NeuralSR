@@ -286,8 +286,11 @@ def part3():
     except Exception as e:  # noqa: BLE001
         check("sequence_psnr 能跑", False, f"{type(e).__name__}: {e}（空16：每个张量去掉第 1 维 t[:, 0]；空18：run_frame 的参数顺序）")
         return
-    check(f"权重全 0 的 MFNet：{s0:.3f} dB（参考 {REF_ZERO:.3f}）", abs(s0 - REF_ZERO) < 0.01,
-          "空19：网络输出在 log 空间，先 decode 再 tonemap" if abs(s0 - REF_ZERO) > 0.01 else "看空17–19")
+    if abs(s0 - 29.471) < 0.01:
+        hint = "空19：用成了 encode（线性 → log），这里要反过来：decode（log → 线性）再 tonemap"
+    else:
+        hint = "空19：网络输出在 log 空间，先 decode 再 tonemap"
+    check(f"权重全 0 的 MFNet：{s0:.3f} dB（参考 {REF_ZERO:.3f}）", abs(s0 - REF_ZERO) < 0.01, hint)
     s1 = eval_mf.sequence_psnr(Accum().to(dev), dev)
     check(f"TAA 式累积（不用网络）：{s1:.3f} dB（参考 {REF_ACCUM:.3f}）", abs(s1 - REF_ACCUM) < 0.01,
           "空17：每段第 0 帧要把 prev 清成 None，不然上一段最后一帧的画面会被拉进来" if abs(s0 - REF_ZERO) < 0.01 else "先让上一条过")
@@ -295,7 +298,9 @@ def part3():
     print("6. train_mf.py")
     src = open(os.path.join(ROOT, "train_mf.py"), encoding="utf-8").read()
     line = next((l for l in src.splitlines() if re.match(r"\s*loader\s*=", l)), "")
-    check("loader 用的是 SeqDataset(\"train\", frames=FRAMES)", re.search(r"SeqDataset\(\s*[\"']train[\"']\s*,\s*frames\s*=\s*FRAMES", line) is not None, "空14")
+    check("loader 用的是 SeqDataset(\"train\", frames=FRAMES)", re.search(r"SeqDataset\(\s*[\"']train[\"']\s*,\s*frames\s*=\s*FRAMES", line) is not None,
+          "空14：SeqDataset 的第一个参数是划分 split，写 SeqDataset(FRAMES) 会把 4 当成划分名；要写 SeqDataset(\"train\", frames=FRAMES)"
+          if re.search(r"SeqDataset\(\s*FRAMES", line) else "空14")
     check("损失用的是 clip_loss", re.search(r"loss\s*=\s*clip_loss\(", src) is not None, "空15")
 
 
