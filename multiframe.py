@@ -8,7 +8,7 @@ from hdr import encode
 from warp import backward_warp
 
 DEPTH_TOL = 0.1  # 拉过来的深度和这一帧的差超过 10%，就当这里上一帧被别的东西挡着
-LAMBDA = 0.1  # 一致性损失的权重（s195）。0.1 时它只占总损失的 6% 左右，要试几个值
+LAMBDA = 0.5  # 一致性损失的权重（s195）。对照（各 5000 步）：0 → 0.5 时 PSNR +0.23 dB、闪烁 −17%；λ = 2 递归发散（第 12 段输出越滚越大，出 nan）
 
 def history_inputs(prev,velocity,gb):
     """prev：上一帧留下的 (输出, 1/深度)，形状 (N, 3, 2h, 2w)、(N, 1, 2h, 2w)，输出在 log 空间；第一帧是 None。
