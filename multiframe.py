@@ -8,6 +8,7 @@ from hdr import encode
 from warp import backward_warp
 
 DEPTH_TOL = 0.1  # 拉过来的深度和这一帧的差超过 10%，就当这里上一帧被别的东西挡着
+LAMBDA = 0.1  # 一致性损失的权重（s195）。0.1 时它只占总损失的 6% 左右，要试几个值
 
 def history_inputs(prev,velocity,gb):
     """prev：上一帧留下的 (输出, 1/深度)，形状 (N, 3, 2h, 2w)、(N, 1, 2h, 2w)，输出在 log 空间；第一帧是 None。
@@ -39,11 +40,20 @@ def run_frame(model,prev,lr,gb,velocity,jitter):
 
 def clip_loss(model,lr,gb,hr,velocity,jitter):
     """一个样本 K 帧：张量的第 1 维是第几帧（第 0 维是 batch）。从"没有历史"开始一帧一帧往下跑。
-        损失 = 每帧 log 空间 L1 的平均"""
-    prev, loss = None,0
+        损失 = (每帧 log 空间 L1 + LAMBDA × 每对相邻帧的一致性损失) / 帧数
+        一致性损失（s195）：网络两帧之间的变化 out_k − 拉过来的 out_{k−1}，要和 GT 的变化 gt_k − 拉过来的 gt_{k−1} 一样；只算掩码 = 1 的地方"""
+    prev, loss, tloss = None, 0, 0
     K = lr.shape[1]
     for k in range(K):
-        #取出第 k 帧（第 1 维的第 k 个）
+        prev_out = prev[0] if prev is not None else None
         out,prev,mask = run_frame(model,prev,lr[:,k],gb[:,k],velocity[:,k],jitter[:,k])
-        loss = loss + (out-encode(hr[:,k])).abs().mean()
-    return loss / K
+        target = encode(hr[:, k])  # gt_k，也换到 log 空间：(16, 3, 128, 128)
+        loss = loss + (out-target).abs().mean()
+        if k > 0:  # 第 0 帧没有上一帧
+            v2 = F.interpolate(velocity[:,k],scale_factor=2,mode="bilinear",align_corners=False)  # 这一帧的速度放大到 2K
+            zero = torch.zeros(lr.shape[0],2,device=lr.device)
+            out_w,out_w_valid = backward_warp(prev_out,v2,zero,zero)    # 拉过来的 out_{k−1}
+            gt_w,gt_w_valid = backward_warp(encode(hr[:,k-1]),v2,zero,zero) # 拉过来的 gt_{k−1}
+            d_out, d_gt = out - out_w, target - gt_w
+            tloss = tloss + (mask * (d_out - d_gt).abs()).mean()  # mask：(16, 1, 128, 128)，广播到 RGB 三个通道
+    return (loss + LAMBDA * tloss) / K  # 循环后：两项按 λ 加起来，再除以帧数
