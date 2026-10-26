@@ -256,16 +256,47 @@ def part2():
           isinstance(prev, tuple) and len(prev) == 2 and prev[0] is o and torch.equal(prev[1], gb[:, 0, 8:9]),
           "空12：prev 是一个元组，里面两样，要加括号：return out, (out, 1/深度), mask")
     up = lambda x: F.interpolate(x, scale_factor=2, mode="bicubic", align_corners=False)
-    want = sum((up(encode(lr[:, k])) - encode(hr[:, k])).abs().mean() for k in range(3)) / 3
+    # 权重全 0 时每帧的输出 = log 空间里双三次放大；s195 加了一致性损失（multiframe.LAMBDA）以后，参考值也算上它
+    from warp import backward_warp
+    outs = [up(encode(lr[:, k])) for k in range(3)]
+    tgts = [encode(hr[:, k]) for k in range(3)]
+    l1 = sum((outs[k] - tgts[k]).abs().mean() for k in range(3))
+    lam = getattr(mf, "LAMBDA", None)
+    ts = []
+    for k in range(1, 3):
+        _, mk = mf.history_inputs((outs[k - 1], gb[:, k - 1, 8:9]), vel[:, k], gb[:, k])
+        v2 = F.interpolate(vel[:, k], scale_factor=2, mode="bilinear", align_corners=False)
+        z = torch.zeros(2, 2)
+        ow, _ = backward_warp(outs[k - 1], v2, z, z)
+        gw, _ = backward_warp(tgts[k - 1], v2, z, z)
+        ts.append((mk * ((outs[k] - ow) - (tgts[k] - gw)).abs()).mean())
+    want = (l1 + lam * sum(ts)) / 3 if lam is not None else l1 / 3
     try:
-        got = mf.clip_loss(zeroed(net), lr, gb, hr, vel, jit)
-        check(f"权重全 0：clip_loss {got.item():.5f}（应该是 {want.item():.5f}）", abs(got.item() - want.item()) < 1e-5,
-              "空13：第 k 帧是 lr[:, k]（第 1 维），损失除以帧数")
+        got = mf.clip_loss(zeroed(net), lr, gb, hr, vel, jit).item()
+        if abs(got - want.item()) < 1e-5:
+            hint = ""
+        elif lam is not None and abs(got - l1.item() / 3) < 1e-6:
+            hint = "一致性损失没加进最后的结果：return (loss + LAMBDA * tloss) / K"
+        elif lam is not None and abs(got - (l1 + lam * ts[-1]).item() / 3) < 1e-6:
+            hint = "tloss 每一帧都被覆盖了，只剩最后一对相邻帧：要写 tloss = tloss + …，K − 1 对都加上"
+        elif lam is not None:
+            hint = "对照：k > 0 才算一致性；v2 是第 k 帧的速度放大到 2K；拉过来的 GT 是 encode(hr[:, k − 1])；乘 mask"
+        else:
+            hint = "空13：第 k 帧是 lr[:, k]（第 1 维），损失除以帧数"
+        name = "（L1 + λ × 一致性）/ 帧数" if lam is not None else ""
+        check(f"权重全 0：clip_loss {got:.5f}（应该是 {want.item():.5f}）{name}", not hint, hint)
         net2 = copy.deepcopy(net)
         mf.clip_loss(net2, lr, gb, hr, vel, jit).backward()
         check("梯度能传回每一层", all(p.grad is not None and p.grad.abs().sum() > 0 for p in net2.parameters() if p.dim() > 1))
     except Exception as e:  # noqa: BLE001
-        check("clip_loss 能跑", False, f"{type(e).__name__}: {e}（空13：每个张量都取第 k 帧：lr[:, k]、gb[:, k]、velocity[:, k]、jitter[:, k]）")
+        msg = str(e)
+        if "NoneType" in msg or "None" in msg:
+            hint = "第 0 帧没有上一帧（prev_out 是 None），一致性那几行要放进 if k > 0: 里"
+        elif "module" in msg:
+            hint = "v2 要自己算：F.interpolate(velocity[:, k], scale_factor=2, mode=\"bilinear\", align_corners=False)；不要 import torchvision 的 v2"
+        else:
+            hint = "空13：每个张量都取第 k 帧：lr[:, k]、gb[:, k]、velocity[:, k]、jitter[:, k]"
+        check("clip_loss 能跑", False, f"{type(e).__name__}: {msg}（{hint}）")
 
 
 class Accum(nn.Module):
